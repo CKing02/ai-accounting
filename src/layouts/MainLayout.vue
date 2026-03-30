@@ -12,6 +12,9 @@
         :collapse="isCollapse"
         router
         class="sidebar-menu"
+        :background-color="sidebarBg"
+        :text-color="sidebarText"
+        :active-text-color="sidebarActiveText"
       >
         <el-menu-item index="/home">
           <el-icon><HomeFilled /></el-icon>
@@ -56,6 +59,14 @@
         </div>
         <div class="header-right">
           <span class="date">{{ currentDate }}</span>
+          <el-tooltip :content="themeStore.isDark ? '切换亮色模式' : '切换深色模式'" placement="bottom">
+            <el-button text circle @click="themeStore.toggleTheme" class="theme-btn">
+              <el-icon size="20">
+                <Moon v-if="!themeStore.isDark" />
+                <Sunny v-else />
+              </el-icon>
+            </el-button>
+          </el-tooltip>
         </div>
       </el-header>
 
@@ -70,8 +81,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useThemeStore } from '@/stores/theme'
+import { Sunny, Moon } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const themeStore = useThemeStore()
 const isCollapse = ref(false)
 
 const activeMenu = computed(() => route.path)
@@ -84,6 +98,15 @@ const currentDate = computed(() => {
     day: 'numeric',
     weekday: 'long'
   })
+})
+
+// 侧边栏颜色
+const sidebarBg = computed(() => themeStore.isDark ? '#1a1a2e' : 'linear-gradient(180deg, #1a1a2e 0%, #16213e 100%)')
+const sidebarText = computed(() => 'rgba(255, 255, 255, 0.7)')
+const sidebarActiveText = computed(() => '#fff')
+
+onMounted(() => {
+  themeStore.initTheme()
 })
 </script>
 
@@ -98,21 +121,9 @@ const currentDate = computed(() => {
   overflow: hidden;
 }
 
-.logo {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: #fff;
-  font-size: 18px;
-  font-weight: bold;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
 .sidebar-menu {
   border-right: none;
-  background: transparent;
+  background: transparent !important;
 }
 
 .sidebar-menu .el-menu-item {
@@ -125,8 +136,20 @@ const currentDate = computed(() => {
   color: #fff;
 }
 
+.logo {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: bold;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .header {
-  background: #fff;
+  background: var(--header-bg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -136,20 +159,34 @@ const currentDate = computed(() => {
 
 .collapse-btn {
   cursor: pointer;
-  color: #666;
+  color: var(--text-color);
 }
 
 .collapse-btn:hover {
-  color: #409eff;
+  color: #667eea;
 }
 
 .date {
-  color: #666;
+  color: var(--text-color);
   font-size: 14px;
+  margin-right: 16px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.theme-btn {
+  color: var(--text-color);
+}
+
+.theme-btn:hover {
+  color: #667eea;
 }
 
 .main-content {
-  background: #f5f7fa;
+  background: var(--bg-color);
   padding: 20px;
 }
 </style>
