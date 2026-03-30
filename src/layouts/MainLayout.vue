@@ -29,6 +29,10 @@
           <el-icon><DataAnalysis /></el-icon>
           <template #title>报告</template>
         </el-menu-item>
+        <el-menu-item index="/budget">
+          <el-icon><WalletFilled /></el-icon>
+          <template #title>预算</template>
+        </el-menu-item>
         <el-menu-item index="/ai">
           <el-icon><ChatDotRound /></el-icon>
           <template #title>AI管家</template>

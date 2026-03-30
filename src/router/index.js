@@ -31,6 +31,12 @@ const routes = [
         meta: { title: '消费报告' }
       },
       {
+        path: '/budget',
+        name: 'Budget',
+        component: () => import('@/pages/budget/index.vue'),
+        meta: { title: '预算管理' }
+      },
+      {
         path: '/ai',
         name: 'AI',
         component: () => import('@/pages/ai/index.vue'),
