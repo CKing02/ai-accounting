@@ -39,7 +39,6 @@
             v-for="prompt in quickPrompts"
             :key="prompt.text"
             class="prompt-tag"
-            :disable-translation="true"
             @click="sendQuickPrompt(prompt.text)"
           >
             {{ prompt.text }}
@@ -60,15 +59,41 @@
         <div class="message-content">
           <div class="message-text" v-html="formatMessage(msg.content)"></div>
           <div class="message-time">{{ formatTime(msg.createdAt) }}</div>
-          <!-- 显示记录的预览 -->
-          <div v-if="msg.recordData" class="record-preview">
-            <el-tag :type="msg.recordData.type === 'income' ? 'success' : 'danger'">
-              {{ msg.recordData.type === 'income' ? '收入' : '支出' }}
-            </el-tag>
-            <span>¥{{ msg.recordData.amount }} - {{ msg.recordData.category }}</span>
-            <el-button size="small" type="primary" @click="confirmRecord(msg.recordData)">
-              确认添加
-            </el-button>
+
+          <!-- 智能记账预览 -->
+          <div v-if="msg.recordData && msg.role === 'assistant'" class="record-preview">
+            <el-card shadow="hover">
+              <template #header>
+                <div class="preview-header">
+                  <el-icon><Edit /></el-icon>
+                  <span>识别到记账请求</span>
+                </div>
+              </template>
+              <div class="preview-content">
+                <div class="preview-item">
+                  <span class="label">类型：</span>
+                  <el-tag :type="msg.recordData.type === 'income' ? 'success' : 'danger'">
+                    {{ msg.recordData.type === 'income' ? '收入' : '支出' }}
+                  </el-tag>
+                </div>
+                <div class="preview-item">
+                  <span class="label">金额：</span>
+                  <span class="value">¥{{ msg.recordData.amount }}</span>
+                </div>
+                <div class="preview-item">
+                  <span class="label">类目：</span>
+                  <el-tag>{{ msg.recordData.category }}</el-tag>
+                </div>
+              </div>
+              <div class="preview-actions">
+                <el-button size="small" @click="editRecordData(msg.recordData)">
+                  <el-icon><Edit /></el-icon> 修改
+                </el-button>
+                <el-button type="primary" size="small" @click="confirmAddRecord(msg.recordData)">
+                  <el-icon><Check /></el-icon> 确认添加
+                </el-button>
+              </div>
+            </el-card>
           </div>
         </div>
       </div>
@@ -87,19 +112,69 @@
       </div>
     </div>
 
+    <!-- 财务概览小卡片 -->
+    <div v-if="showFinanceCard" class="finance-mini-card">
+      <div class="mini-stat">
+        <span class="mini-label">总资产</span>
+        <span class="mini-value">¥{{ financeStats.totalBalance.toFixed(2) }}</span>
+      </div>
+      <el-divider direction="vertical" />
+      <div class="mini-stat">
+        <span class="mini-label">本月收入</span>
+        <span class="mini-value income">¥{{ financeStats.monthlyIncome.toFixed(2) }}</span>
+      </div>
+      <el-divider direction="vertical" />
+      <div class="mini-stat">
+        <span class="mini-label">本月支出</span>
+        <span class="mini-value expense">¥{{ financeStats.monthlyExpense.toFixed(2) }}</span>
+      </div>
+    </div>
+
     <!-- 输入区域 -->
     <div class="input-area">
-      <el-input
-        v-model="inputText"
-        type="textarea"
-        :rows="2"
-        placeholder="输入消息...（例如：今天花了50块买午餐）"
-        @keydown.enter.ctrl="handleSend"
-      />
-      <el-button type="primary" :loading="loading" @click="handleSend" :disabled="!hasApiKey">
-        <el-icon><Promotion /></el-icon> 发送
+      <div class="input-wrapper">
+        <el-input
+          v-model="inputText"
+          type="textarea"
+          :rows="2"
+          placeholder="输入消息...（例如：今天花了50块买午餐）"
+          @keydown.enter.ctrl="handleSend"
+          @input="inputText = inputText.replace(/\n/g, '')"
+        />
+      </div>
+      <el-button type="primary" :loading="loading" @click="handleSend" :disabled="!hasApiKey || !inputText.trim()">
+        <el-icon><Promotion /></el-icon>
       </el-button>
     </div>
+
+    <!-- 修改记录对话框 -->
+    <el-dialog v-model="editDialogVisible" title="修改记录" width="400px">
+      <el-form :model="editingRecord" label-width="80px">
+        <el-form-item label="类型">
+          <el-radio-group v-model="editingRecord.type">
+            <el-radio-button label="expense">支出</el-radio-button>
+            <el-radio-button label="income">收入</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="editingRecord.amount" :min="0.01" :precision="2" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="类目">
+          <el-select v-model="editingRecord.category" style="width: 100%">
+            <el-option
+              v-for="cat in categories"
+              :key="cat"
+              :label="cat"
+              :value="cat"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitEditedRecord">确认添加</el-button>
+      </template>
+    </el-dialog>
 
     <!-- API密钥设置对话框 -->
     <ApiKeyDialog v-model="showApiKeyDialog" />
@@ -107,34 +182,58 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useAIStore } from '@/stores/ai'
 import { useRecordsStore } from '@/stores/records'
-import { sendMessage, hasApiKey as checkHasApiKey } from '@/services/ai'
+import { useAccountsStore } from '@/stores/accounts'
+import { useCategoriesStore } from '@/stores/categories'
+import { sendMessage, hasApiKey as checkHasApiKey, getFinancialContext } from '@/services/ai'
 import { ElMessage } from 'element-plus'
 import ApiKeyDialog from '@/components/ai/ApiKeyDialog.vue'
 
 const aiStore = useAIStore()
 const recordsStore = useRecordsStore()
+const accountsStore = useAccountsStore()
+const categoriesStore = useCategoriesStore()
 
 const inputText = ref('')
 const chatContainer = ref(null)
 const loading = ref(false)
 const showApiKeyDialog = ref(false)
+const editDialogVisible = ref(false)
+const editingRecord = ref({})
+const financeStats = ref({ totalBalance: 0, monthlyIncome: 0, monthlyExpense: 0 })
 
 const hasApiKey = ref(checkHasApiKey())
 const conversations = computed(() => aiStore.conversations)
+const showFinanceCard = computed(() => conversations.value.length > 0 && conversations.value.length < 5)
+
+const categories = computed(() => {
+  const cats = categoriesStore.categories.map(c => c.name)
+  return [...new Set(cats)]
+})
 
 const quickPrompts = [
   { text: '帮我分析这个月的消费' },
   { text: '我想制定一个存钱计划' },
   { text: '今天花了200块买衣服' },
-  { text: '我该怎么开始理财？' }
+  { text: '我该怎么开始理财？' },
+  { text: '我上月攒了多少钱？' }
 ]
 
-onMounted(() => {
-  aiStore.loadConversations()
+onMounted(async () => {
+  await aiStore.loadConversations()
+  await refreshFinanceStats()
+  // 监听API密钥变化
+  watch(hasApiKey, () => {
+    hasApiKey.value = checkHasApiKey()
+  })
 })
+
+async function refreshFinanceStats() {
+  const stats = await getFinancialContext()
+  financeStats.value = stats
+}
 
 function formatTime(timeStr) {
   const date = new Date(timeStr)
@@ -142,18 +241,16 @@ function formatTime(timeStr) {
 }
 
 function formatMessage(content) {
-  // 简单的markdown格式化
   return content
     .replace(/\n/g, '<br>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/`(.+?)`/g, '<code style="background:#f0f0f0;padding:2px 4px;border-radius:3px;">$1</code>')
 }
 
 async function handleSend() {
   const text = inputText.value.trim()
   if (!text) return
 
-  // 保存用户消息
   await aiStore.addMessage('user', text)
   inputText.value = ''
   scrollToBottom()
@@ -164,11 +261,11 @@ async function handleSend() {
     return
   }
 
-  // 调用AI
   loading.value = true
   try {
     const result = await sendMessage(text)
     await aiStore.addMessage('assistant', result.content, result.recordIntent || null)
+    await refreshFinanceStats()
     scrollToBottom()
   } catch (error) {
     await aiStore.addMessage('assistant', `抱歉，发生了错误：${error.message}`)
@@ -183,23 +280,44 @@ async function sendQuickPrompt(prompt) {
   await handleSend()
 }
 
-async function confirmRecord(recordData) {
+function editRecordData(recordData) {
+  editingRecord.value = { ...recordData }
+  editDialogVisible.value = true
+}
+
+async function confirmAddRecord(recordData) {
+  await doAddRecord(recordData)
+  // 标记已确认
+  const lastMsg = conversations.value[conversations.value.length - 1]
+  if (lastMsg?.recordData) {
+    lastMsg.recordData.confirmed = true
+  }
+}
+
+async function submitEditedRecord() {
+  await doAddRecord(editingRecord.value)
+  editDialogVisible.value = false
+}
+
+async function doAddRecord(recordData) {
+  const accounts = accountsStore.accounts
+  if (accounts.length === 0) {
+    ElMessage.warning('请先添加账户')
+    return
+  }
+
   try {
     await recordsStore.addRecord({
-      accountId: recordsStore.records[0]?.accountId || 1,
+      accountId: accounts[0].id,
       amount: recordData.amount,
       category: recordData.category,
       type: recordData.type,
       date: new Date().toISOString().split('T')[0],
       description: '通过AI管家添加'
     })
+    await accountsStore.loadAccounts()
+    await refreshFinanceStats()
     ElMessage.success('记录已添加！')
-
-    // 更新消息，移除预览
-    const lastMsg = conversations.value[conversations.value.length - 1]
-    if (lastMsg?.recordData) {
-      lastMsg.recordData = null
-    }
   } catch (error) {
     ElMessage.error('添加失败')
   }
@@ -217,9 +335,6 @@ async function clearHistory() {
   await aiStore.clearHistory()
   ElMessage.success('对话已清空')
 }
-
-// 监听API密钥变化
-const originalCheck = checkHasApiKey
 </script>
 
 <style scoped>
@@ -235,7 +350,7 @@ const originalCheck = checkHasApiKey
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .page-header h2 {
@@ -255,7 +370,7 @@ const originalCheck = checkHasApiKey
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .welcome-message {
@@ -311,12 +426,14 @@ const originalCheck = checkHasApiKey
 
 .prompt-tag {
   cursor: pointer;
+  padding: 10px 16px;
+  font-size: 14px;
 }
 
 .message {
   display: flex;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .message.user {
@@ -344,7 +461,7 @@ const originalCheck = checkHasApiKey
 }
 
 .message-content {
-  max-width: 70%;
+  max-width: 75%;
 }
 
 .message.user .message-content {
@@ -355,7 +472,7 @@ const originalCheck = checkHasApiKey
   background: #f5f7fa;
   padding: 12px 16px;
   border-radius: 12px;
-  line-height: 1.6;
+  line-height: 1.7;
   white-space: pre-wrap;
   text-align: left;
 }
@@ -371,14 +488,49 @@ const originalCheck = checkHasApiKey
 }
 
 .record-preview {
+  margin-top: 12px;
+  text-align: left;
+}
+
+.record-preview :deep(.el-card) {
+  border: 1px solid #e4e7ed;
+}
+
+.preview-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  gap: 8px;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.preview-content {
+  padding: 12px 0;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.preview-item .label {
+  color: #666;
+  width: 50px;
+}
+
+.preview-item .value {
+  font-weight: 500;
+  color: #333;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
 }
 
 .message-time {
@@ -413,13 +565,69 @@ const originalCheck = checkHasApiKey
   40% { transform: scale(1); }
 }
 
+.finance-mini-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.mini-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.mini-label {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.mini-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.mini-value.income {
+  color: #38ef7d;
+}
+
+.mini-value.expense {
+  color: #eb3349;
+}
+
 .input-area {
   display: flex;
   gap: 12px;
   align-items: flex-end;
+  background: #fff;
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
 }
 
-.input-area .el-textarea {
+.input-wrapper {
   flex: 1;
+}
+
+.input-area .el-textarea :deep(textarea) {
+  border: none;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 12px;
+  resize: none;
+}
+
+.input-area .el-button {
+  height: 68px;
+  width: 68px;
+  border-radius: 8px;
 }
 </style>

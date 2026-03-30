@@ -28,6 +28,9 @@ export function hasApiKey() {
   return !!apiKey
 }
 
+// 导出获取财务上下文（供其他组件使用）
+export { getFinancialContext }
+
 // 构建系统提示词
 function buildSystemPrompt() {
   return `你是用户的AI智能理财管家，名字叫"小财"。
