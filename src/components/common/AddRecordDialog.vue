@@ -79,6 +79,8 @@ import { ref, computed, watch } from 'vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useCategoriesStore } from '@/stores/categories'
 import { useRecordsStore } from '@/stores/records'
+import { useBudgetStore } from '@/stores/budget'
+import { useNotificationStore } from '@/stores/notification'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -98,6 +100,8 @@ const emit = defineEmits(['update:modelValue', 'success'])
 const accountsStore = useAccountsStore()
 const categoriesStore = useCategoriesStore()
 const recordsStore = useRecordsStore()
+const budgetStore = useBudgetStore()
+const notificationStore = useNotificationStore()
 
 const formRef = ref(null)
 const submitting = ref(false)
@@ -179,6 +183,19 @@ async function handleSubmit() {
         ...form.value,
         type: props.type
       })
+
+      // 检查预算并发送通知
+      if (props.type === 'expense' && budgetStore.budget.enabled) {
+        const spent = recordsStore.monthlyStats.expense
+        const limit = budgetStore.budget.monthlyLimit
+        const percentage = limit > 0 ? (spent / limit) * 100 : 0
+
+        // 检查预算预警
+        if (percentage >= 80) {
+          notificationStore.checkBudgetAlert(spent, limit, percentage)
+        }
+      }
+
       ElMessage.success('记录成功')
     }
     emit('success')

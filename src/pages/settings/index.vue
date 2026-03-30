@@ -4,6 +4,88 @@
       <h2>设置</h2>
     </div>
 
+    <!-- 通知设置 -->
+    <div class="settings-section">
+      <h3>
+        <el-icon><Bell /></el-icon>
+        通知设置
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <div class="setting-label">启用通知</div>
+          <div class="setting-desc">允许应用发送系统通知提醒</div>
+        </div>
+        <el-switch v-model="notificationSettings.enabled" @change="handleNotificationEnabledChange" />
+      </div>
+
+      <div class="setting-item" v-if="notificationSettings.enabled">
+        <div class="setting-info">
+          <div class="setting-label">预算预警</div>
+          <div class="setting-desc">当支出达到预算80%或超支时发送通知</div>
+        </div>
+        <el-switch v-model="notificationSettings.budgetAlert" />
+      </div>
+
+      <div class="setting-item" v-if="notificationSettings.enabled">
+        <div class="setting-info">
+          <div class="setting-label">存钱目标提醒</div>
+          <div class="setting-desc">存钱目标达成或即将达成时发送通知</div>
+        </div>
+        <el-switch v-model="notificationSettings.savingGoalAlert" />
+      </div>
+
+      <div class="setting-item" v-if="notificationSettings.enabled && notificationSettings.budgetAlert">
+        <div class="setting-info">
+          <div class="setting-label">每日记账提醒</div>
+          <div class="setting-desc">定时提醒您记录每日收支</div>
+        </div>
+        <el-switch v-model="notificationSettings.dailyReminder" />
+      </div>
+
+      <div class="setting-item" v-if="notificationSettings.enabled && notificationSettings.dailyReminder">
+        <div class="setting-info">
+          <div class="setting-label">提醒时间</div>
+          <div class="setting-desc">每天定时提醒的时间</div>
+        </div>
+        <el-time-picker
+          v-model="dailyReminderTime"
+          format="HH:mm"
+          value-format="HH:mm"
+          placeholder="选择时间"
+          style="width: 120px"
+        />
+      </div>
+
+      <div class="setting-item" v-if="notificationSettings.enabled">
+        <el-button type="primary" @click="saveNotificationSettings">保存设置</el-button>
+        <el-button @click="testNotification">发送测试通知</el-button>
+      </div>
+
+      <!-- 通知历史 -->
+      <div v-if="notificationStore.notifications.length > 0" class="notification-history">
+        <div class="history-header">
+          <span>通知历史</span>
+          <el-button text size="small" @click="notificationStore.clearNotifications">
+            清空
+          </el-button>
+        </div>
+        <div class="notification-list">
+          <div
+            v-for="item in notificationStore.notifications.slice(0, 5)"
+            :key="item.id"
+            class="notification-item"
+            :class="{ unread: !item.read }"
+            @click="notificationStore.markAsRead(item.id)"
+          >
+            <div class="notification-title">{{ item.title }}</div>
+            <div class="notification-message">{{ item.message }}</div>
+            <div class="notification-time">{{ formatTime(item.createdAt) }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- AI设置 -->
     <div class="settings-section">
       <h3>AI设置</h3>
@@ -106,12 +188,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/services/localDB'
 import { hasApiKey } from '@/services/ai'
 import { getSupabaseConfig, saveSupabaseConfig } from '@/services/supabase'
+import { useNotificationStore } from '@/stores/notification'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ApiKeyDialog from '@/components/ai/ApiKeyDialog.vue'
+
+const notificationStore = useNotificationStore()
 
 const showApiKeyDialog = ref(false)
 const showSupabaseDialog = ref(false)
@@ -120,6 +205,9 @@ const lastSyncTime = ref(null)
 
 const hasApiKeyValue = ref(hasApiKey())
 const hasSupabase = computed(() => !!getSupabaseConfig())
+
+const notificationSettings = ref({ ...notificationStore.settings })
+const dailyReminderTime = ref(notificationStore.settings.dailyReminderTime)
 
 const supabaseForm = ref({
   url: '',
@@ -131,7 +219,45 @@ onMounted(() => {
   if (config) {
     supabaseForm.value = config
   }
+  notificationSettings.value = { ...notificationStore.settings }
 })
+
+async function handleNotificationEnabledChange(enabled) {
+  if (enabled) {
+    const granted = await notificationStore.requestPermission()
+    if (!granted) {
+      ElMessage.warning('通知权限被拒绝，请在浏览器设置中允许通知')
+      notificationSettings.value.enabled = false
+    }
+  }
+}
+
+function saveNotificationSettings() {
+  notificationStore.updateSettings({
+    ...notificationSettings.value,
+    dailyReminderTime: dailyReminderTime.value
+  })
+  ElMessage.success('通知设置已保存')
+}
+
+function testNotification() {
+  notificationStore.addNotification({
+    type: 'info',
+    title: '🔔 测试通知',
+    message: '通知功能正常工作！'
+  })
+  ElMessage.success('测试通知已发送')
+}
+
+function formatTime(timeStr) {
+  const date = new Date(timeStr)
+  return date.toLocaleString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 function saveSupabase() {
   if (!supabaseForm.value.url || !supabaseForm.value.anonKey) {
@@ -146,7 +272,6 @@ function saveSupabase() {
 async function syncNow() {
   isSyncing.value = true
   try {
-    // 模拟同步
     await new Promise(resolve => setTimeout(resolve, 1500))
     lastSyncTime.value = new Date().toLocaleString('zh-CN')
     ElMessage.success('同步成功')
@@ -207,7 +332,6 @@ function importData() {
         { type: 'warning' }
       )
 
-      // 导入数据
       await db.accounts.clear()
       await db.records.clear()
       await db.categories.clear()
@@ -258,11 +382,11 @@ async function clearAllData() {
 
 .page-header h2 {
   font-size: 20px;
-  color: #333;
+  color: var(--text-color);
 }
 
 .settings-section {
-  background: #fff;
+  background: var(--card-bg);
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
@@ -270,11 +394,14 @@ async function clearAllData() {
 }
 
 .settings-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 16px;
-  color: #333;
+  color: var(--text-color);
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .setting-item {
@@ -282,7 +409,7 @@ async function clearAllData() {
   justify-content: space-between;
   align-items: center;
   padding: 16px 0;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .setting-item:last-child {
@@ -294,27 +421,80 @@ async function clearAllData() {
   border-bottom: none;
 }
 
+.setting-info {
+  flex: 1;
+}
+
 .setting-label {
   font-weight: 500;
-  color: #333;
+  color: var(--text-color);
   margin-bottom: 4px;
 }
 
 .setting-desc {
   font-size: 13px;
-  color: #999;
+  color: var(--text-secondary);
+}
+
+.notification-history {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  color: var(--text-color);
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notification-item {
+  padding: 12px;
+  background: var(--hover-bg);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.notification-item.unread {
+  border-left: 3px solid #667eea;
+}
+
+.notification-title {
+  font-weight: 500;
+  color: var(--text-color);
+  margin-bottom: 4px;
+}
+
+.notification-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.notification-time {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .about-info {
   text-align: center;
   padding: 20px;
-  color: #666;
+  color: var(--text-secondary);
   line-height: 2;
 }
 
 .about-info p:first-child {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--text-color);
 }
 </style>
