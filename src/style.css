@@ -1,0 +1,24 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Element Plus 覆盖样式 */
+.el-button--primary {
+  --el-button-bg-color: #667eea;
+  --el-button-border-color: #667eea;
+  --el-button-hover-bg-color: #7a8ff5;
+  --el-button-hover-border-color: #7a8ff5;
+}
